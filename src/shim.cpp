@@ -8,7 +8,8 @@
 
 #include <Zydis/Zydis.h>
 #include <bson.h>
-#include <dlfcn.h>
+// TODO not on windows
+// #include <dlfcn.h>
 #include <fcntl.h>
 #include <libgen.h>
 
@@ -17,7 +18,8 @@
 #endif //__APPLE__
 
 #include <pthread.h>
-#include <pwd.h>
+// TODO not on windows
+// #include <pwd.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -649,7 +651,7 @@ static void *draconity_install(void *_) {
     }
 #endif //__APPLE__
     draconity_init();
-    return NULL;
+    return nullptr;
 }
 
 __attribute__((constructor))
@@ -659,5 +661,5 @@ void cons() {
     dup2(log, 1);
     dup2(log, 2);
 #endif
-    draconity_install(NULL);
+    draconity_install(nullptr);
 }
