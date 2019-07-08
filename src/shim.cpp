@@ -1,3 +1,9 @@
+#include <utility>
+
+#include <utility>
+
+#include <utility>
+
 // TODO needs to be replaced with cross platform shimming approach
 
 #include <Zydis/Zydis.h>
@@ -5,22 +11,29 @@
 #include <dlfcn.h>
 #include <fcntl.h>
 #include <libgen.h>
+
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif //__APPLE__
+
 #include <pthread.h>
 #include <pwd.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
 
 #include "server.h"
 #include "draconity.h"
+
 #ifdef __APPLE__
 #include "CoreSymbolication.h"
-#endif //__APPLE__
+#include <sys/mman.h>
+#else // _WIN32 (or linux)
+// TODO can this be removed? Only would be used for debugging of patching code
+#include <memoryapi.h>
+
+#endif
 
 #ifndef streq
 #define streq(a, b) !strcmp(a, b)
@@ -39,36 +52,98 @@ drg_engine *_engine = NULL;
 
 #define state draconity_state
 
-typedef struct code_hook {
-    struct code_hook **handle;
-    const char *name;
+//typedef struct code_hook {
+//    struct code_hook **handle;
+//    const char *name;
+//    void *target;
+//    uint64_t offset;
+//    bool active;
+//    uint8_t *addr, *patch, *orig;
+//    size_t size;
+//} code_hook;
+
+//code_hook *DSXEngine_New_hook = NULL,
+//        *DSXEngine_Create_hook = NULL,
+//        *DSXEngine_LoadGrammar_hook = NULL,
+//        *DSXEngine_GetMicState_hook = NULL;
+
+class CodeHook {
+public:
+    CodeHook(std::string name, void *target, off_t offset = 0) {
+        this->name = std::move(name);
+        this->target = target;
+        this->offset = offset;
+
+        this->active = false;
+        this->addr = nullptr;//.getAddress(); // TODO: looked up by symbolicator
+        this->patch = nullptr; // filled in when you have a patch function
+        this->orig = nullptr; // filled in when you have a patch function
+        this->size = 0; // filled in by patch function
+    }
+
+    void hook_apply() {
+        patch_write(this->addr, this->patch, this->size);
+    }
+
+    void hook_revert() {
+        patch_write(this->addr, this->orig, this->size);
+    }
+
+    uint8_t *getAddr() const {
+        return addr;
+    }
+
+    void setAddr(uint8_t *addr) {
+        CodeHook::addr = addr;
+    }
+
+    uint8_t *getPatch() const {
+        return patch;
+    }
+
+    void setPatch(int index, int value) {
+        CodeHook::patch[index] = value;
+    }
+
+    uint8_t *getOrig() const {
+        return orig;
+    }
+
+    void setOrig(uint8_t *orig) {
+        CodeHook::orig = orig;
+    }
+
+    size_t getSize() const {
+        return size;
+    }
+
+    void setSize(size_t size) {
+        CodeHook::size = size;
+    }
+
+private:
+    std::string name;
     void *target;
-    uint64_t offset;
+    off_t offset;
+
     bool active;
     uint8_t *addr, *patch, *orig;
     size_t size;
-} code_hook;
 
-code_hook *DSXEngine_New_hook = NULL,
-          *DSXEngine_Create_hook = NULL,
-          *DSXEngine_LoadGrammar_hook = NULL,
-          *DSXEngine_GetMicState_hook = NULL;
+    static void patch_write(void *addr, void *patch, size_t size) {
+        uint64_t prot_size = (size + 0xfff) & ~0xfff;
+        uint64_t prot_addr = (uintptr_t) addr & ~0xfff;
+        // mprotect((void *) prot_addr, size, PROT_READ | PROT_WRITE | PROT_EXEC);
+        memcpy(addr, patch, size);
+        // mprotect((void *) prot_addr, size, PROT_READ | PROT_EXEC);
+    }
+};
 
-static void patch_write(void *addr, void *patch, size_t size) {
-    uint64_t prot_size = (size + 0xfff) & ~0xfff;
-    uint64_t prot_addr = (uintptr_t)addr &~0xfff;
-    mprotect((void *)prot_addr, size, PROT_READ|PROT_WRITE|PROT_EXEC);
-    memcpy(addr, patch, size);
-    mprotect((void *)prot_addr, size, PROT_READ|PROT_EXEC);
-}
+CodeHook *DSXEngine_New_hook = nullptr,
+        *DSXEngine_Create_hook = nullptr,
+        *DSXEngine_LoadGrammar_hook = nullptr,
+        *DSXEngine_GetMicState_hook = nullptr;
 
-static void hook_apply(code_hook *hook) {
-    patch_write(hook->addr, hook->patch, hook->size);
-}
-
-static void hook_revert(code_hook *hook) {
-    patch_write(hook->addr, hook->orig, hook->size);
-}
 
 #if RUN_IN_DRAGON
 int draconity_set_param(const char *key, const char *value) {
@@ -79,19 +154,19 @@ int draconity_set_param(const char *key, const char *value) {
     return ret;
 }
 
-static char *homedir() {
-    char *home = getenv("HOME");
-    if (home) {
-        return strdup(home);
-    } else {
-        struct passwd pw, *pwp;
-        char buf[1024];
-        if (getpwuid_r(getuid(), &pw, buf, sizeof(buf), &pwp) == 0) {
-            return strdup(pwp->pw_dir);
-        }
-        return NULL;
-    }
-}
+//static char *homedir() {
+//    char *home = getenv("HOME");
+//    if (home) {
+//        return strdup(home);
+//    } else {
+//        struct passwd pw, *pwp;
+//        char buf[1024];
+//        if (getpwuid_r(getuid(), &pw, buf, sizeof(buf), &pwp) == 0) {
+//            return strdup(pwp->pw_dir);
+//        }
+//        return NULL;
+//    }
+//}
 
 typedef struct {
     char *timeout;
@@ -178,18 +253,18 @@ static void engine_acquire(drg_engine *engine, bool early) {
 }
 
 static void *DSXEngine_New() {
-    hook_revert(DSXEngine_New_hook);
+    DSXEngine_New_hook->hook_revert();
     drg_engine *engine = _DSXEngine_New();
-    hook_apply(DSXEngine_New_hook);
+    DSXEngine_New_hook->hook_apply();
     draconity_logf("DSXEngine_New() = %p", engine);
     engine_acquire(engine, true);
     return _engine;
 }
 
 static int DSXEngine_Create(char *s, uint64_t val, drg_engine **engine) {
-    hook_revert(DSXEngine_Create_hook);
+    DSXEngine_Create_hook->hook_revert();
     int ret = _DSXEngine_Create(s, val, engine);
-    hook_apply(DSXEngine_Create_hook);
+    DSXEngine_Create_hook->hook_apply();
     draconity_logf("DSXEngine_Create(%s, %llu, &%p) = %d", s, val, engine, ret);
     engine_acquire(*engine, true);
     return ret;
@@ -197,9 +272,9 @@ static int DSXEngine_Create(char *s, uint64_t val, drg_engine **engine) {
 
 static int DSXEngine_GetMicState(drg_engine *engine, int64_t *state) {
     engine_acquire(engine, false);
-    hook_revert(DSXEngine_GetMicState_hook);
+    DSXEngine_GetMicState_hook->hook_revert();
     int ret = _DSXEngine_GetMicState(engine, state);
-    hook_apply(DSXEngine_GetMicState_hook);
+    DSXEngine_GetMicState_hook->hook_apply();
     return ret;
 }
 
@@ -214,9 +289,9 @@ static int DSXEngine_LoadGrammar(drg_engine *engine, int format, dsx_dataptr *da
     printf("\n\n"); fflush(stdout);
 #endif
 
-    hook_revert(DSXEngine_LoadGrammar_hook);
+    DSXEngine_LoadGrammar_hook->hook_revert();
     int ret = _DSXEngine_LoadGrammar(engine, format, data, grammar);
-    hook_apply(DSXEngine_LoadGrammar_hook);
+    DSXEngine_LoadGrammar_hook->hook_apply();
     return ret;
 }
 
@@ -297,7 +372,7 @@ int DSXGrammar_RegisterBeginPhraseCallback(drg_grammar *grammar, void *cb, void 
     // return _DSXGrammar_RegisterBeginPhraseCallback(grammar, cb, user, key);
 }
 
-int DSXGrammar_RegisterPhraseHypothesisCallback(drg_grammar *grammar, void *cb, void *user, unsigned int *key) {
+Oint DSXGrammar_RegisterPhraseHypothesisCallback(drg_grammar *grammar, void *cb, void *user, unsigned int *key) {
     *key = 0;
     return 0;
     // return _DSXGrammar_RegisterPhraseHypothesisCallback(grammar, cb, user, key);
@@ -311,8 +386,8 @@ static bool dis_ready = false;
 
 static void dis_ensure() {
     if (!dis_ready) {
-        if (!ZYDIS_SUCCESS(ZydisDecoderInit(&dis, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64)) ||
-                !ZYDIS_SUCCESS(ZydisFormatterInit(&dis_fmt, ZYDIS_FORMATTER_STYLE_INTEL))) {
+        if (!ZYAN_SUCCESS(ZydisDecoderInit(&dis, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_ADDRESS_WIDTH_64)) ||
+            !ZYAN_SUCCESS(ZydisFormatterInit(&dis_fmt, ZYDIS_FORMATTER_STYLE_INTEL))) {
             printf("failed to init disassembler\n");
             abort();
         }
@@ -325,9 +400,11 @@ static void dis_mem(void *addr, size_t size) {
     size_t offset = 0;
     ZydisDecodedInstruction ins;
     char buf[256];
-    while (ZYDIS_SUCCESS(ZydisDecoderDecodeBuffer(&dis, addr + offset, size - offset, (uint64_t)addr + offset, &ins))) {
-        ZydisFormatterFormatInstruction(&dis_fmt, &ins, buf, sizeof(buf));
-        printf("%016llx %s\n", ins.instrAddress, buf);
+    while (ZYDIS_SUCCESS(
+            ZydisDecoderDecodeBuffer(&dis, addr + offset, size - offset, (uint64_t) addr + offset, &ins))) {
+        // TODO enable for debugging patching code
+        //ZydisFormatterFormatInstruction(&dis_fmt, &ins, buf, sizeof(buf));
+        // printf("%016llx %s\n", ins.instrAddress, buf);
         offset += ins.length;
     }
 }
@@ -336,40 +413,42 @@ static size_t dis_code_size(void *addr, size_t size) {
     dis_ensure();
     size_t offset = 0;
     ZydisDecodedInstruction ins;
-    while (ZYDIS_SUCCESS(ZydisDecoderDecodeBuffer(&dis, addr + offset, 64, (uint64_t)addr + offset, &ins)) && offset < size) {
+    while (ZYDIS_SUCCESS(ZydisDecoderDecodeBuffer(&dis, addr + offset, 64, (uint64_t) addr + offset, &ins)) &&
+           offset < size) {
         offset += ins.length;
     }
     return offset;
 }
 
 static void patch_stub(void *addr, void *to) {
-    uint64_t *target = (void *)(addr + 6 + *(uint32_t *)(addr + 2));
-    *target = (uintptr_t)to;
+    uint64_t *target = (void *) (addr + 6 + *(uint32_t *) (addr + 2));
+    *target = (uintptr_t) to;
 }
 
 #define JMP_SIZE 12
+
 static void fill_jmp(void *buf, void *addr) {
     uint8_t jmp[12] = {0x48, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xe0};
-    *(uint64_t *)&jmp[2] = (uintptr_t)addr;
+    *(uint64_t *) &jmp[2] = (uintptr_t) addr;
     memcpy(buf, jmp, sizeof(jmp));
 }
 
-static void patch_redirect(void *addr, void *to, code_hook *hook) {
-    hook->size = dis_code_size(addr, JMP_SIZE);
-    hook->orig = malloc(hook->size);
-    memcpy(hook->orig, addr, hook->size);
+static void patch_redirect(unsigned char *addr, void *to, CodeHook *hook) {
+    hook->setSize(dis_code_size(addr, JMP_SIZE));
+    hook->setOrig(malloc(hook->getSize());
+    memcpy(hook->getOrig(), addr, hook->getSize());
 
-    hook->patch = malloc(hook->size);
-    fill_jmp(hook->patch, to);
-    for (int i = JMP_SIZE; i < hook->size; i++) {
-        hook->patch[i] = 0x90;
+    hook->setPatch(malloc(hook->getSize());
+    fill_jmp(hook->getPatch(), to);
+    for (int i = JMP_SIZE; i < hook->getSize(); i++) {
+        hook->setPatch(i, 0x90);
     }
-    hook->addr = addr;
-    hook_apply(hook);
+    hook->setAddr(addr);
+    hook->hook_apply();
 }
 
 typedef struct {
-    const char *name;
+    std::string name;
     void **ptr;
     bool active;
 } symload;
@@ -446,88 +525,103 @@ static void walk_image(CSSymbolicatorRef csym, const char *image, code_hook *hoo
 }
 #endif //__APPLE__
 
-#define h(_name) {.handle=NULL, .name=#_name, .target=_name, .offset=0, .active=false, 0}
-#define ho(_name, _handle) {.handle=_handle, .name=#_name, .target=_name, .offset=0, .active=false, 0}
-static code_hook dragon_hooks[] = {
+//#define h(_name) {.handle=NULL, .name=#_name, .target=_name, .offset=0, .active=false, 0}
+//#define ho(_name, _handle) CodeHook(.handle=_handle, .name=#_name, .target=_name, .offset=0, .active=false, 0)
+#define ho(_name, _handle) CodeHook(#_name, _handle)
+static std::initializer_list<CodeHook> dragon_hooks = {
 #if RUN_IN_DRAGON
-    ho(DSXEngine_New, &DSXEngine_New_hook),
-    ho(DSXEngine_Create, &DSXEngine_Create_hook),
-    ho(DSXEngine_GetMicState, &DSXEngine_GetMicState_hook),
-    ho(DSXEngine_LoadGrammar, &DSXEngine_LoadGrammar_hook),
+ho(DSXEngine_New, &DSXEngine_New_hook),
+ho(DSXEngine_Create, &DSXEngine_Create_hook),
+ho(DSXEngine_GetMicState, &DSXEngine_GetMicState_hook),
+ho(DSXEngine_LoadGrammar, &DSXEngine_LoadGrammar_hook),
 #endif //RUN_IN_DRAGON
-    {0},
 };
 #undef h
 
-#define s(x) {#x, (void **)&_##x, false}
-static symload server_syms[] = {
-    s(DSXEngine_Create),
-    s(DSXEngine_New),
+class SymbolLoad {
+private:
+    symload sym;
 
-    s(DSXEngine_AddWord),
-    s(DSXEngine_AddTemporaryWord),
-    s(DSXEngine_DeleteWord),
-    s(DSXEngine_ValidateWord),
-    s(DSXEngine_EnumWords),
+public:
+    explicit SymbolLoad(symload symload) {
+        sym = std::move(symload);
+    }
 
-    s(DSXWordEnum_GetCount),
-    s(DSXWordEnum_Next),
-    s(DSXWordEnum_End),
-
-    s(DSXEngine_GetCurrentSpeaker),
-    s(DSXEngine_GetMicState),
-    s(DSXEngine_LoadGrammar),
-    s(DSXEngine_Mimic),
-    s(DSXEngine_Pause),
-    s(DSXEngine_RegisterAttribChangedCallback),
-    s(DSXEngine_RegisterMimicDoneCallback),
-    s(DSXEngine_RegisterPausedCallback),
-    s(DSXEngine_Resume),
-    s(DSXEngine_ResumeRecognition),
-    s(DSXEngine_SetBeginPhraseCallback),
-    s(DSXEngine_SetEndPhraseCallback),
-
-    s(DSXEngine_SetStringValue),
-    s(DSXEngine_GetValue),
-    s(DSXEngine_GetParam),
-    s(DSXEngine_DestroyParam),
-
-    s(DSXFileSystem_PreferenceGetValue),
-    s(DSXFileSystem_PreferenceSetValue),
-    s(DSXFileSystem_SetResultsDirectory),
-    s(DSXFileSystem_SetUsersDirectory),
-    s(DSXFileSystem_SetVocabsLocation),
-
-    s(DSXGrammar_Activate),
-    s(DSXGrammar_Deactivate),
-    s(DSXGrammar_Destroy),
-    s(DSXGrammar_GetList),
-    s(DSXGrammar_RegisterBeginPhraseCallback),
-    s(DSXGrammar_RegisterEndPhraseCallback),
-    s(DSXGrammar_RegisterPhraseHypothesisCallback),
-    s(DSXGrammar_SetApplicationName),
-    s(DSXGrammar_SetApplicationName),
-    s(DSXGrammar_SetList),
-    s(DSXGrammar_SetPriority),
-    s(DSXGrammar_SetSpecialGrammar),
-    s(DSXGrammar_Unregister),
-
-    s(DSXResult_BestPathWord),
-    s(DSXResult_GetWordNode),
-    s(DSXResult_Destroy),
-    {0},
+    SymbolLoad(std::string name, void **ptr, bool active) {
+        sym.name = std::move(name);
+        sym.ptr = ptr;
+        sym.active = active;
+    }
 };
 
-static symload mrec_syms[] = {
-    s(SDApi_SetShowCalls),
-    s(SDApi_SetShowCallsWithFileSpecArgs),
-    s(SDApi_SetShowCallPointerArguments),
-    s(SDApi_SetShowCallMemDeltas),
-    s(SDApi_SetShowAllocation),
-    s(SDApi_SetShowAllocationHistogram),
-    s(SDRule_New),
-    s(SDRule_Delete),
-    {0},
+#define s(x) SymbolLoad(#x, (void **)&_##x, false)
+static std::initializer_list<SymbolLoad> server_syms = {
+        s(DSXEngine_Create),
+        s(DSXEngine_New),
+        s(DSXEngine_AddWord),
+        s(DSXEngine_AddTemporaryWord),
+        s(DSXEngine_DeleteWord),
+        s(DSXEngine_ValidateWord),
+        s(DSXEngine_EnumWords),
+
+        s(DSXWordEnum_GetCount),
+        s(DSXWordEnum_Next),
+        s(DSXWordEnum_End),
+
+        s(DSXEngine_GetCurrentSpeaker),
+        s(DSXEngine_GetMicState),
+        s(DSXEngine_LoadGrammar),
+        s(DSXEngine_Mimic),
+        s(DSXEngine_Pause),
+        s(DSXEngine_RegisterAttribChangedCallback),
+        s(DSXEngine_RegisterMimicDoneCallback),
+        s(DSXEngine_RegisterPausedCallback),
+        s(DSXEngine_Resume),
+        s(DSXEngine_ResumeRecognition),
+        s(DSXEngine_SetBeginPhraseCallback),
+        s(DSXEngine_SetEndPhraseCallback),
+
+        s(DSXEngine_SetStringValue),
+        s(DSXEngine_GetValue),
+        s(DSXEngine_GetParam),
+        s(DSXEngine_DestroyParam),
+
+        s(DSXFileSystem_PreferenceGetValue),
+        s(DSXFileSystem_PreferenceSetValue),
+        s(DSXFileSystem_SetResultsDirectory),
+        s(DSXFileSystem_SetUsersDirectory),
+        s(DSXFileSystem_SetVocabsLocation),
+
+        s(DSXGrammar_Activate),
+        s(DSXGrammar_Deactivate),
+        s(DSXGrammar_Destroy),
+        s(DSXGrammar_GetList),
+        s(DSXGrammar_RegisterBeginPhraseCallback),
+        s(DSXGrammar_RegisterEndPhraseCallback),
+        s(DSXGrammar_RegisterPhraseHypothesisCallback),
+        s(DSXGrammar_SetApplicationName),
+        s(DSXGrammar_SetApplicationName),
+        s(DSXGrammar_SetList),
+        s(DSXGrammar_SetPriority),
+        s(DSXGrammar_SetSpecialGrammar),
+        s(DSXGrammar_Unregister),
+
+        s(DSXResult_BestPathWord),
+        s(DSXResult_GetWordNode),
+        s(DSXResult_Destroy),
+        SymbolLoad({nullptr}),
+};
+
+static std::initializer_list<SymbolLoad> mrec_syms = {
+        s(SDApi_SetShowCalls),
+        s(SDApi_SetShowCallsWithFileSpecArgs),
+        s(SDApi_SetShowCallPointerArguments),
+        s(SDApi_SetShowCallMemDeltas),
+        s(SDApi_SetShowAllocation),
+        s(SDApi_SetShowAllocationHistogram),
+        s(SDRule_New),
+        s(SDRule_Delete),
+        SymbolLoad({nullptr}),
 };
 #undef s
 
