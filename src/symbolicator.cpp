@@ -9,7 +9,7 @@
 class Symbolicator {
 public:
     void loadSymbols(std::string libraryName, std::list<SymbolLoad> symbols) {
-        HINSTANCE hDLL = LoadLibraryEx(libraryName);
+        HINSTANCE hDLL = LoadLibrary(libraryName);
         if (hDLL == nullptr) {
             throw new std::runtime_error("Could not load DLL " + libraryName)
         }
