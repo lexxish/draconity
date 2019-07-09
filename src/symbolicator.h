@@ -6,3 +6,4 @@
 #include <string>
 #include <windows.h>
 #include "shim.cpp"
+#include "server.h"

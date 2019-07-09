@@ -2,27 +2,24 @@
 // Created by lexxish on 7/8/2019.
 //
 
-#ifndef DRACONITY_SYMBOLICATOR_H
-#define DRACONITY_SYMBOLICATOR_H
-
 #include "symbolicator.h"
 
 class Symbolicator {
 public:
-    void loadSymbols(std::string libraryName, std::list<SymbolLoad> symbols) {
-        HINSTANCE hDLL = LoadLibrary(libraryName.c_str());
+    void loadSymbols(const std::string& libraryName, const std::list<SymbolLoad>& symbols) {
+        HMODULE hDLL = LoadLibrary(libraryName.c_str());
         if (hDLL == nullptr) {
-            throw std::runtime_error("Could not load DLL " + libraryName + ". " + getLastErrorAsString());
+            draconity_logf("ERROR: Could not load DLL %s. %s", libraryName.c_str(), getLastErrorAsString().c_str());
         }
         for (auto sym : symbols) {
-            FARPROC procAddress = GetProcAddress(hDLL, sym->getName());
+            FARPROC procAddress = GetProcAddress(hDLL, sym.getName().c_str());
             if (procAddress == nullptr) {
-                throw std::runtime_error(
-                        "Could not find method " + sym->getName() + " in library " + libraryName + ". " +
-                        getLastErrorAsString()
+                draconity_logf(
+                        "WARN: Could not find method %s in library %s. %s",
+                        sym.getName().c_str(), libraryName.c_str(), getLastErrorAsString().c_str()
                 );
             }
-            sym->setAddr(procAddress);
+            sym.setPtr(reinterpret_cast<void **>(&procAddress));
         }
     }
 
@@ -46,5 +43,3 @@ private:
         return message;
     }
 };
-
-#endif //DRACONITY_SYMBOLICATOR_H

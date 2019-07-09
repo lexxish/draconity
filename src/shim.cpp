@@ -445,11 +445,11 @@ static void patch_redirect(unsigned char *addr, void *to, CodeHook *hook) {
     hook->hook_apply();
 }
 
-typedef struct {
-    std::string name;
-    void **ptr;
-    bool active;
-} symload;
+//typedef struct {
+//    std::string name;
+//    void **ptr;
+//    bool active;
+//} symload;
 
 #ifdef __APPLE__
 static void walk_image(CSSymbolicatorRef csym, const char *image, code_hook *hooks, symload *loads) {
@@ -538,17 +538,30 @@ ho(DSXEngine_LoadGrammar, &DSXEngine_LoadGrammar_hook),
 
 class SymbolLoad {
 private:
-    symload sym;
-
+    std::string name;
+    void **ptr;
+    bool active;
 public:
-    explicit SymbolLoad(symload symload) {
-        sym = std::move(symload);
+    SymbolLoad(std::string name, void **ptr, bool active) {
+        this->name = std::move(name);
+        this->ptr = ptr;
+        this->active = active;
     }
 
-    SymbolLoad(std::string name, void **ptr, bool active) {
-        sym.name = std::move(name);
-        sym.ptr = ptr;
-        sym.active = active;
+    const std::string &getName() const {
+        return name;
+    }
+
+    void setName(const std::string &name) {
+        SymbolLoad::name = name;
+    }
+
+    void **getPtr() const {
+        return ptr;
+    }
+
+    void setPtr(void **ptr) {
+        this->ptr = ptr;
     }
 };
 
@@ -607,7 +620,6 @@ static std::initializer_list<SymbolLoad> server_syms = {
         s(DSXResult_BestPathWord),
         s(DSXResult_GetWordNode),
         s(DSXResult_Destroy),
-        SymbolLoad({nullptr}),
 };
 
 static std::initializer_list<SymbolLoad> mrec_syms = {
@@ -619,7 +631,6 @@ static std::initializer_list<SymbolLoad> mrec_syms = {
         s(SDApi_SetShowAllocationHistogram),
         s(SDRule_New),
         s(SDRule_Delete),
-        SymbolLoad({nullptr}),
 };
 #undef s
 
