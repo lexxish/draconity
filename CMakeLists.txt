@@ -12,12 +12,8 @@ set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
 
 set(CMAKE_LIBRARY_PATH C:/programs/lib)
 
-add_definitions(-std=c++0x)
-
-#link_directories(${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
+link_directories(${CMAKE_LIBRARY_OUTPUT_DIRECTORY})
 include_directories(C:/code/libbson/src/bson C:/code/libbson/cmake-build-debug/src/bson C:/code/zydis/include C:/code/zydis/cmake-build-debug C:/code/zydis/cmake-build-debug/dependencies/zycore C:/code/zydis/dependencies/zycore/include /usr/include/libbson-1.0 /usr/local/include/libbson-1.0)
-#link_directories(C:/code/libbson C:/code/zydis/cmake-build-debug)
-#target_link_libraries(draconity C:/code/libbson/cmake-build-debug/libbson-static-1.0.a)
 
 include_directories(src)
 if (ASAN)

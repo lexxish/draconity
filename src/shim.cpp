@@ -99,6 +99,10 @@ public:
         return patch;
     }
 
+    void setPatch(uint8_t* patch) {
+        CodeHook::patch = patch;
+    }
+
     void setPatch(int index, int value) {
         CodeHook::patch[index] = value;
     }
@@ -398,10 +402,10 @@ static void dis_mem(void *addr, size_t size) {
     size_t offset = 0;
     ZydisDecodedInstruction ins;
     char buf[256];
-    while (ZYDIS_SUCCESS(
+    while (ZYAN_SUCCESS(
             ZydisDecoderDecodeBuffer(&dis, addr + offset, size - offset, (uint64_t) addr + offset, &ins))) {
         // TODO enable for debugging patching code
-        //ZydisFormatterFormatInstruction(&dis_fmt, &ins, buf, sizeof(buf));
+        // ZydisFormatterFormatInstruction(&dis_fmt, &ins, buf, sizeof(buf));
         // printf("%016llx %s\n", ins.instrAddress, buf);
         offset += ins.length;
     }
@@ -433,10 +437,10 @@ static void fill_jmp(void *buf, void *addr) {
 
 static void patch_redirect(unsigned char *addr, void *to, CodeHook *hook) {
     hook->setSize(dis_code_size(addr, JMP_SIZE));
-    hook->setOrig(malloc(hook->getSize());
+    hook->setOrig(new uint8_t[hook->getSize()]);
     memcpy(hook->getOrig(), addr, hook->getSize());
 
-    hook->setPatch(malloc(hook->getSize());
+    hook->setPatch(new uint8_t[hook->getSize()]);
     fill_jmp(hook->getPatch(), to);
     for (int i = JMP_SIZE; i < hook->getSize(); i++) {
         hook->setPatch(i, 0x90);
